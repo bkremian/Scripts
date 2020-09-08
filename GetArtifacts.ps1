@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 #Requires -Modules @{ModuleName="PSFalcon";ModuleVersion='1.4.1'}
-#Requires -Modules @{ModuleName="PSRiskIQ";ModuleVersion='1.0'}
+#Requires -Modules @{ModuleName="PSRiskIQ";ModuleVersion='1.0.2'}
 <#
 .SYNOPSIS
     Retrieve artifacts associated with a RiskIQ project and adds domains/hashes/IPs
@@ -9,6 +9,8 @@
     The project identifier to scan for artifacts
 .PARAMETER CSV
     A CSV file exported from a RiskIQ Threat Intel article
+.PARAMETER EXPIRATION
+    The number of days before the IOC expires (Default: 1)
 #>
 [CmdletBinding()]
 [OutputType()]
@@ -25,11 +27,23 @@ param(
         Position = 1,
         Mandatory=$true)]
     [ValidateScript({ Test-Path $_ })]
-    [string] $CSV
+    [string] $CSV,
+
+    [Parameter(
+        ParameterSetName = 'API',
+        Position = 2)]
+    [Parameter(
+        ParameterSetName = 'CSV',
+        Position = 2)]
+    [int] $Expiration
 )
 begin {
-    # Days before new Falcon IOCs expire
-    $Expiration = 7
+    if (-not $Expiration) {
+        # Days before new Falcon IOCs expire, if not defined
+        $Expiration = 1
+    }
+    # Maximum number of IOCs per add request
+    $MaxCount = 200
 
     $Import = if ($ProjectId) {
         # Retrieve artifacts from ProjectId
@@ -75,7 +89,7 @@ process {
                 Write-Host " $Type result(s)" -ForegroundColor Blue
             }
         }
-        [array] $Array = $Import | ForEach-Object {
+        [array] $Array = $Import.foreach{
             # Set description
             $Description = if ($ProjectId) {
                 "RiskIQ ProjectId $ProjectId"
@@ -106,7 +120,7 @@ process {
             # Output IOC
             @{
                 description = $Description
-                expiration_days = $Expiration
+                expiration_days = [int] $Expiration
                 policy = "detect"
                 type = $Type
                 value = $Value
@@ -114,29 +128,29 @@ process {
         }
         Write-Host "`nImporting into CrowdStrike Falcon..." -ForegroundColor DarkRed -NoNewLine
 
-        # Add IOCs
-        $AddIOCs = New-CsIoc -Body $Array
-
-        if (-not($AddIOCs.errors)) {
+        $AddIOCs = for ($i = 0; $i -le $Array.count; $i += $MaxCount) {
+            # Add IOCs in groups, to avoid maximum limits
+            New-CsIoc -Body $Array[$i..($i + ($MaxCount - 1))]
+        }
+        if (-not $AddIOCs.errors) {
             Write-Host "complete." -ForegroundColor Red
-
-            # Export to CSV
-            $Output = $Array | ForEach-Object {
-                [PSCustomObject] @{
-                    type = $_.type
-                    value = $_.value
-                    policy = $_.policy
-                    expiration_days = $_.expiration_days
-                    description = $_.description
-                    source = $_.source
-                }
-            }
-            # Output result file
-            $Output | Export-Csv $OutputPath -NoTypeInformation
         } else {
             # Output error
-            throw ($AddIOCs | ConvertTo-Json)
+            Write-Error "$($AddIOCs.errors.code): $($AddIOCs.errors.message)"
         }
+        # Export to CSV
+        $Output = $Array.foreach{
+            [PSCustomObject] @{
+                type = $_.type
+                value = $_.value
+                policy = $_.policy
+                expiration_days = $_.expiration_days
+                description = $_.description
+                source = $_.source
+            }
+        }
+        # Output result file
+        $Output | Export-Csv $OutputPath -NoTypeInformation
     } else {
         # Output error
         throw "No results available for import"
