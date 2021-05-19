@@ -5,5 +5,5 @@ Retrieves indicators associated with a RiskIQ Project or Threat Intel Article an
 CrowdStrike Falcon as Custom IOCs.
 
 ### Requirements
-**[PSFalcon](https://github.com/bk-CS/PSFalcon)**\
+**[PSFalcon](https://github.com/crowdstrike/psfalcon)**\
 **[PSRiskIQ](https://github.com/bkremian/PSRiskIQ)**
