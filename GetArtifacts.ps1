@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-#Requires -Modules @{ModuleName="PSFalcon";ModuleVersion='1.4.1'}
+#Requires -Modules @{ModuleName="PSFalcon";ModuleVersion='2.0.0'}
 #Requires -Modules @{ModuleName="PSRiskIQ";ModuleVersion='1.0.2'}
 <#
 .SYNOPSIS
@@ -9,10 +9,12 @@
     The project identifier to scan for artifacts
 .PARAMETER CSV
     A CSV file exported from a RiskIQ Threat Intel article
+.PARAMETER PLATFORMS
+    The operating system platforms to assign the IOCs (default: 'windows', 'mac', 'linux')
 .PARAMETER EXPIRATION
-    The number of days before the IOC expires (Default: 1)
+    The number of days before the IOC expires (default: 1)
 #>
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'API')]
 [OutputType()]
 param(
     [Parameter(
@@ -35,15 +37,31 @@ param(
     [Parameter(
         ParameterSetName = 'CSV',
         Position = 2)]
+    [ValidateSet('windows', 'mac', 'linux')]
+    [array] $Platforms,
+
+    [Parameter(
+        ParameterSetName = 'API',
+        Position = 3)]
+    [Parameter(
+        ParameterSetName = 'CSV',
+        Position = 3)]
     [int] $Expiration
 )
 begin {
-    if (-not $Expiration) {
-        # Days before new Falcon IOCs expire, if not defined
-        $Expiration = 1
-    }
     # Maximum number of IOCs per add request
     $MaxCount = 200
+
+    if (-not $Platforms) {
+        # Set default platforms
+        $Platforms = @('windows', 'mac', 'linux')
+    }
+    if (-not $Expiration) {
+        # Set expiration days
+        $Expiration = 1
+    }
+    # Convert expiration date format
+    $ExpirationDate = (Get-Date).AddDays($Expiration)
 
     $Import = if ($ProjectId) {
         # Retrieve artifacts from ProjectId
@@ -98,18 +116,10 @@ process {
             }
             # Convert type
             $Type = switch ($_.type) {
-                'ip' {
-                    'ipv4'
-                }
-                'hash_md5' {
-                    'md5'
-                }
-                'hash_sha256' {
-                    'sha256'
-                }
-                default {
-                    $_
-                }
+                'ip'          { 'ipv4' }
+                'hash_md5'    { 'md5' }
+                'hash_sha256' { 'sha256' }
+                default       { $_ }
             }
             # Convert value from API/CSV
             $Value = if ($_.query) {
@@ -120,37 +130,43 @@ process {
             # Output IOC
             @{
                 description = $Description
-                expiration_days = [int] $Expiration
-                policy = "detect"
+                action = "detect"
                 type = $Type
                 value = $Value
+                platforms = $Platforms
+                expiration = $ExpirationDate.ToString('yyyy-MM-ddTHH:mm:ss.000Z')
+                applied_globally = $true
             }
         }
         Write-Host "`nImporting into CrowdStrike Falcon..." -ForegroundColor DarkRed -NoNewLine
 
-        $AddIOCs = for ($i = 0; $i -le $Array.count; $i += $MaxCount) {
-            # Add IOCs in groups, to avoid maximum limits
-            New-CsIoc -Body $Array[$i..($i + ($MaxCount - 1))]
-        }
-        if (-not $AddIOCs.errors) {
-            Write-Host "complete." -ForegroundColor Red
-        } else {
-            # Output error
-            Write-Error "$($AddIOCs.errors.code): $($AddIOCs.errors.message)"
-        }
-        # Export to CSV
-        $Output = $Array.foreach{
-            [PSCustomObject] @{
-                type = $_.type
-                value = $_.value
-                policy = $_.policy
-                expiration_days = $_.expiration_days
-                description = $_.description
-                source = $_.source
+        try {
+            $AddIOCs = for ($i = 0; $i -le $Array.count; $i += $MaxCount) {
+                # Add IOCs in groups, to avoid maximum limits
+                New-FalconIOC -Array $Array[$i..($i + ($MaxCount - 1))]
             }
+            if ($AddIOCs) {
+                Write-Host "complete." -ForegroundColor Red
+
+                # Export to CSV
+                $Output = $Array.foreach{
+                    [PSCustomObject] @{
+                        type = $_.type
+                        value = $_.value
+                        action = $_.action
+                        platforms = $_.platforms -join ','
+                        expiration = $_.expiration
+                        description = $_.description
+                        applied_globally = $_.applied_globally
+                    }
+                }
+                # Output result file
+                $Output | Export-Csv $OutputPath -NoTypeInformation
+            }
+        } catch {
+            # Output error
+            throw $_
         }
-        # Output result file
-        $Output | Export-Csv $OutputPath -NoTypeInformation
     } else {
         # Output error
         throw "No results available for import"
