@@ -134,7 +134,7 @@ process {
                 type = $Type
                 value = $Value
                 platforms = $Platforms
-                expiration = $ExpirationDate.ToString('yyyy-MM-ddTHH:mm:ss.000Z')
+                expiration = $ExpirationDate.ToString('yyyy-MM-ddTHH:mm:ssZ')
                 applied_globally = $true
             }
         }
