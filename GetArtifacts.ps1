@@ -129,12 +129,12 @@ process {
             }
             # Output IOC
             @{
-                description = $Description
-                action = "detect"
-                type = $Type
-                value = $Value
-                platforms = $Platforms
-                expiration = $ExpirationDate.ToString('yyyy-MM-ddTHH:mm:ssZ')
+                description      = $Description
+                action           = "detect"
+                type             = $Type
+                value            = $Value
+                platforms        = $Platforms
+                expiration       = $ExpirationDate.ToString('yyyy-MM-ddTHH:mm:ssZ')
                 applied_globally = $true
             }
         }
@@ -151,12 +151,12 @@ process {
                 # Export to CSV
                 $Output = $Array.foreach{
                     [PSCustomObject] @{
-                        type = $_.type
-                        value = $_.value
-                        action = $_.action
-                        platforms = $_.platforms -join ','
-                        expiration = $_.expiration
-                        description = $_.description
+                        type             = $_.type
+                        value            = $_.value
+                        action           = $_.action
+                        platforms        = $_.platforms -join ','
+                        expiration       = $_.expiration
+                        description      = $_.description
                         applied_globally = $_.applied_globally
                     }
                 }
